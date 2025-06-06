@@ -138,6 +138,12 @@ class Program
                     cmd.Parameters.AddWithValue("$user", lowerUser);
                     cmd.ExecuteNonQuery();
                     client.SendMessage(channel, $"✅ @{user} is now opted in for logging.");
+                    Console.ForegroundColor = ConsoleColor.White;
+                    Console.WriteLine("[AI OPT-IN]");
+                    Console.ForegroundColor = ConsoleColor.Gray;
+                    Console.WriteLine("{0,-25}{1}", "user:", user);
+                    Console.WriteLine("{0,-25}{1}", "channel:", channel);
+                    Console.ResetColor();
                     return;
                 }
 
@@ -155,6 +161,12 @@ class Program
                     cmd.Parameters.AddWithValue("$user", lowerUser);
                     cmd.ExecuteNonQuery();
                     client.SendMessage(channel, $"🚫 @{user} has opted out of logging.");
+                    Console.ForegroundColor = ConsoleColor.DarkYellow;
+                    Console.WriteLine("[AI OPT-OUT]");
+                    Console.ForegroundColor = ConsoleColor.Gray;
+                    Console.WriteLine("{0,-25}{1}", "user:", user);
+                    Console.WriteLine("{0,-25}{1}", "channel:", channel);
+                    Console.ResetColor();
                     return;
                 }
 
@@ -302,8 +314,9 @@ class Program
 
                         client.SendMessage(channel, response);
 
-                        Console.ForegroundColor = ConsoleColor.Gray;
+                        Console.ForegroundColor = ConsoleColor.Green;
                         Console.WriteLine("[TRIGGERED]");
+                        Console.ForegroundColor = ConsoleColor.Gray;
                         Console.WriteLine("{0,-25}{1}", "user:", user);
                         Console.WriteLine("{0,-25}{1}", "command:", message);
                         Console.WriteLine("{0,-25}{1}", "response:", response);
@@ -332,6 +345,20 @@ class Program
                     Console.WriteLine("{0,-25}{1}", "channel:", channel);
                     Console.ResetColor();
                 }
+                var logCheck = db.CreateCommand();
+                logCheck.CommandText = "SELECT COUNT(*) FROM AiOptedIn WHERE Username = $user";
+                logCheck.Parameters.AddWithValue("$user", lowerUser);
+                if (Convert.ToInt64(logCheck.ExecuteScalar()) > 0)
+                {
+                    Console.ForegroundColor = ConsoleColor.White;
+                    Console.WriteLine("[CHAT LOG]");
+                    Console.ForegroundColor = ConsoleColor.Gray;
+                    Console.WriteLine("{0,-25}{1}", "user:", user);
+                    Console.WriteLine("{0,-25}{1}", "message:", message);
+                    Console.WriteLine("{0,-25}{1}", "channel:", channel);
+                    Console.ResetColor();
+                }
+
             };
 
             client.Connect();
