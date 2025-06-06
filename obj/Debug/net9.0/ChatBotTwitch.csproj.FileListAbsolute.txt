@@ -1,0 +1,14 @@
+D:\c#\ChatBotTwitch\ChatBotTwitch\bin\Debug\net9.0\ChatBotTwitch.exe
+D:\c#\ChatBotTwitch\ChatBotTwitch\bin\Debug\net9.0\ChatBotTwitch.deps.json
+D:\c#\ChatBotTwitch\ChatBotTwitch\bin\Debug\net9.0\ChatBotTwitch.runtimeconfig.json
+D:\c#\ChatBotTwitch\ChatBotTwitch\bin\Debug\net9.0\ChatBotTwitch.dll
+D:\c#\ChatBotTwitch\ChatBotTwitch\bin\Debug\net9.0\ChatBotTwitch.pdb
+D:\c#\ChatBotTwitch\ChatBotTwitch\obj\Debug\net9.0\ChatBotTwitch.GeneratedMSBuildEditorConfig.editorconfig
+D:\c#\ChatBotTwitch\ChatBotTwitch\obj\Debug\net9.0\ChatBotTwitch.AssemblyInfoInputs.cache
+D:\c#\ChatBotTwitch\ChatBotTwitch\obj\Debug\net9.0\ChatBotTwitch.AssemblyInfo.cs
+D:\c#\ChatBotTwitch\ChatBotTwitch\obj\Debug\net9.0\ChatBotTwitch.csproj.CoreCompileInputs.cache
+D:\c#\ChatBotTwitch\ChatBotTwitch\obj\Debug\net9.0\ChatBotTwitch.dll
+D:\c#\ChatBotTwitch\ChatBotTwitch\obj\Debug\net9.0\refint\ChatBotTwitch.dll
+D:\c#\ChatBotTwitch\ChatBotTwitch\obj\Debug\net9.0\ChatBotTwitch.pdb
+D:\c#\ChatBotTwitch\ChatBotTwitch\obj\Debug\net9.0\ChatBotTwitch.genruntimeconfig.cache
+D:\c#\ChatBotTwitch\ChatBotTwitch\obj\Debug\net9.0\ref\ChatBotTwitch.dll
