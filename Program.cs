@@ -1,6 +1,5 @@
 ﻿using System;
 using System.IO;
-using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
 using TwitchLib.Client;
 using TwitchLib.Client.Events;
@@ -8,43 +7,8 @@ using TwitchLib.Client.Models;
 
 class Program
 {
-    static bool IsAdmin(string username)
-    {
-        if (username.ToLower() == "skunkelmusen") return true;
-
-        using (var connection = new SqliteConnection("Data Source=commands.db"))
-        {
-            connection.Open();
-            var cmd = connection.CreateCommand();
-            cmd.CommandText = "SELECT COUNT(*) FROM Admins WHERE LOWER(Username) = LOWER($user)";
-            cmd.Parameters.AddWithValue("$user", username);
-            var result = cmd.ExecuteScalar();
-            long count = Convert.ToInt64(result);
-            return count > 0;
-        }
-    }
-
     static void Main(string[] args)
     {
-        // 💣 Midlertidig: slet databasen ved opstart (fjern denne linje senere!)
-        /*if (File.Exists("commands.db"))
-        {
-            Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine("[DB FOUND]");
-            Console.ForegroundColor = ConsoleColor.Gray;
-            Console.WriteLine("{0,-25}{1}", "existing file:", "commands.db");
-            Console.WriteLine("{0,-25}{1}", "action:", "Deleting old database");
-            Console.ResetColor();
-
-            File.Delete("commands.db");
-
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine("[DB DELETED]");
-            Console.ForegroundColor = ConsoleColor.Gray;
-            Console.WriteLine("{0,-25}{1}", "status:", "commands.db deleted");
-            Console.ResetColor();
-        }*/
-
         var username = "skunkllm";
         var accessToken = "oauth:ufv99wh0tt0a2pkaxgdtvz6bq05kl8";
         var channelName = "skunkelmusen";
@@ -52,11 +16,11 @@ class Program
         var credentials = new ConnectionCredentials(username, accessToken);
         var client = new TwitchClient();
 
-        using (var connection = new SqliteConnection($"Data Source=commands.db"))
+        using (var db = new SqliteConnection("Data Source=commands.db"))
         {
-            connection.Open();
+            db.Open();
 
-            var tableCmd = connection.CreateCommand();
+            var tableCmd = db.CreateCommand();
             tableCmd.CommandText = @"
                 CREATE TABLE IF NOT EXISTS Commands (
                     Trigger TEXT NOT NULL,
@@ -64,7 +28,6 @@ class Program
                     Channel TEXT NOT NULL,
                     PRIMARY KEY (Trigger, Channel)
                 );
-
                 CREATE TABLE IF NOT EXISTS UnknownCommands (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     Trigger TEXT NOT NULL,
@@ -72,246 +35,261 @@ class Program
                     Channel TEXT NOT NULL,
                     Timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
                 );
-
                 CREATE TABLE IF NOT EXISTS Admins (
                     Username TEXT PRIMARY KEY
+                );
+                CREATE TABLE IF NOT EXISTS AiOptedIn (
+                    Username TEXT PRIMARY KEY
+                );
+                CREATE TABLE IF NOT EXISTS CommandUsage (
+                    Trigger TEXT NOT NULL,
+                    Channel TEXT NOT NULL,
+                    Count INTEGER DEFAULT 0,
+                    PRIMARY KEY (Trigger, Channel)
                 );";
             tableCmd.ExecuteNonQuery();
 
-            var ensureAdminCmd = connection.CreateCommand();
+            var ensureAdminCmd = db.CreateCommand();
             ensureAdminCmd.CommandText = "INSERT OR IGNORE INTO Admins (Username) VALUES ('skunkelmusen')";
             ensureAdminCmd.ExecuteNonQuery();
-        }
 
-        client.Initialize(credentials, channelName);
+            client.Initialize(credentials, channelName);
 
-        client.OnConnected += (sender, e) =>
-        {
-            Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine("[CONNECTED]");
-            Console.ForegroundColor = ConsoleColor.Gray;
-            Console.WriteLine("{0,-25}{1}", "bot username:", e.BotUsername);
-            Console.ResetColor();
-
-            client.SendMessage(channelName, $"✅ Connected to channel {channelName}");
-        };
-
-        client.OnJoinedChannel += (sender, e) =>
-        {
-            Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine("[JOINED CHANNEL]");
-            Console.ForegroundColor = ConsoleColor.Gray;
-            Console.WriteLine("{0,-25}{1}", "channel:", e.Channel);
-            Console.ResetColor();
-
-            client.SendMessage(e.Channel, "Hello everyone, I, SkunkLLM, have ARRIVED, prepare for CHAOS!.... to a certain degree");
-        };
-
-        client.OnMessageReceived += (sender, e) =>
-        {
-            var message = e.ChatMessage.Message.Trim();
-            var user = e.ChatMessage.Username;
-            var channel = e.ChatMessage.Channel;
-
-            // $stop (hardcoded)
-            if (message == "$stop" && user.ToLower() == "skunkelmusen")
+            client.OnConnected += (s, e) =>
             {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine("[FORCED SHUTDOWN]");
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                Console.WriteLine("[CONNECTED]");
                 Console.ForegroundColor = ConsoleColor.Gray;
-                Console.WriteLine("{0,-25}{1}", "triggered by:", "skunkelmusen");
-                Console.WriteLine("{0,-25}{1}", "channel:", channel);
+                Console.WriteLine("{0,-25}{1}", "bot username:", e.BotUsername);
+                Console.ResetColor();
+            };
+
+            client.OnJoinedChannel += (s, e) =>
+            {
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                Console.WriteLine("[JOINED CHANNEL]");
+                Console.ForegroundColor = ConsoleColor.Gray;
+                Console.WriteLine("{0,-25}{1}", "channel:", e.Channel);
                 Console.ResetColor();
 
-                client.SendMessage(channel, "💀 Bot shutting down...");
-                Environment.Exit(0);
-            }
+                client.SendMessage(e.Channel, "Hello everyone, I, SkunkLLM, have ARRIVED, prepare for CHAOS!.... to a certain degree");
+            };
 
-            // $op @user
-            if (message.StartsWith("$op "))
+            client.OnMessageReceived += (s, e) =>
             {
-                var parts = message.Split(' ', 2);
-                if (parts.Length < 2 || !parts[1].StartsWith("@"))
+                var message = e.ChatMessage.Message.Trim();
+                var user = e.ChatMessage.Username;
+                var channel = e.ChatMessage.Channel;
+                var lowerUser = user.ToLower();
+
+                bool IsAdmin()
                 {
-                    client.SendMessage(channel, "Usage: $op @username");
-                    return;
+                    var cmd = db.CreateCommand();
+                    cmd.CommandText = "SELECT COUNT(*) FROM Admins WHERE LOWER(Username) = LOWER($user)";
+                    cmd.Parameters.AddWithValue("$user", lowerUser);
+                    return Convert.ToInt64(cmd.ExecuteScalar()) > 0 || lowerUser == "skunkelmusen";
                 }
 
-                if (!IsAdmin(user))
+                if (message.Equals("$stop", StringComparison.OrdinalIgnoreCase) && lowerUser == "skunkelmusen")
                 {
-                    Console.ForegroundColor = ConsoleColor.Yellow;
-                    Console.WriteLine("[ACCESS DENIED]");
+                    client.SendMessage(channel, "☘️ Shutting down...");
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine("[STOP]");
                     Console.ForegroundColor = ConsoleColor.Gray;
-                    Console.WriteLine("{0,-25}{1}", "user:", user);
-                    Console.WriteLine("{0,-25}{1}", "attempted:", message);
-                    Console.WriteLine("{0,-25}{1}", "reason:", "not an admin");
+                    Console.WriteLine("{0,-25}{1}", "triggered by:", "skunkelmusen");
+                    Console.WriteLine("{0,-25}{1}", "channel:", channel);
                     Console.ResetColor();
-                    client.SendMessage(channel, "Only admins can use $op.");
+                    Environment.Exit(0);
+                }
+
+                if (message.Equals("$aioptin", StringComparison.OrdinalIgnoreCase))
+                {
+                    var cmd = db.CreateCommand();
+                    cmd.CommandText = "INSERT OR IGNORE INTO AiOptedIn (Username) VALUES ($user)";
+                    cmd.Parameters.AddWithValue("$user", lowerUser);
+                    cmd.ExecuteNonQuery();
+                    client.SendMessage(channel, $"✅ @{user} is now opted in for logging.");
                     return;
                 }
 
-                var target = parts[1].TrimStart('@');
-
-                using (var connection = new SqliteConnection("Data Source=commands.db"))
+                if (message.Equals("$aioptout", StringComparison.OrdinalIgnoreCase))
                 {
-                    connection.Open();
-                    var insertCmd = connection.CreateCommand();
-                    insertCmd.CommandText = "INSERT OR IGNORE INTO Admins (Username) VALUES ($user)";
-                    insertCmd.Parameters.AddWithValue("$user", target);
-                    insertCmd.ExecuteNonQuery();
-                }
-
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine("[OP GRANTED]");
-                Console.ForegroundColor = ConsoleColor.Gray;
-                Console.WriteLine("{0,-25}{1}", "granted by:", user);
-                Console.WriteLine("{0,-25}{1}", "new admin:", target);
-                Console.ResetColor();
-
-                client.SendMessage(channel, $"🔐 @{target} is now an admin.");
-                return;
-            }
-
-            if (message.StartsWith("$addcommand "))
-            {
-                if (!IsAdmin(user))
-                {
-                    Console.ForegroundColor = ConsoleColor.Yellow;
-                    Console.WriteLine("[ACCESS DENIED]");
-                    Console.ForegroundColor = ConsoleColor.Gray;
-                    Console.WriteLine("{0,-25}{1}", "user:", user);
-                    Console.WriteLine("{0,-25}{1}", "command:", "$addcommand");
-                    Console.WriteLine("{0,-25}{1}", "reason:", "not an admin");
-                    Console.ResetColor();
-                    client.SendMessage(channel, "Only admins can add commands.");
+                    var cmd = db.CreateCommand();
+                    cmd.CommandText = "DELETE FROM AiOptedIn WHERE Username = $user";
+                    cmd.Parameters.AddWithValue("$user", lowerUser);
+                    cmd.ExecuteNonQuery();
+                    client.SendMessage(channel, $"🚫 @{user} has opted out of logging.");
                     return;
                 }
 
-                var split = message.Substring(12).Trim().Split(' ', 2);
-                if (split.Length < 2)
+                if (message.StartsWith("$op ") || message.StartsWith("$deop "))
                 {
-                    client.SendMessage(channel, "Usage: $addcommand $<trigger> <response>");
-                    return;
-                }
-
-                var trigger = split[0];
-                var response = split[1];
-
-                using (var connection = new SqliteConnection("Data Source=commands.db"))
-                {
-                    connection.Open();
-
-                    var insertCmd = connection.CreateCommand();
-                    insertCmd.CommandText = @"
-                        INSERT OR REPLACE INTO Commands (Trigger, Response, Channel)
-                        VALUES ($trigger, $response, $channel)";
-                    insertCmd.Parameters.AddWithValue("$trigger", trigger);
-                    insertCmd.Parameters.AddWithValue("$response", response);
-                    insertCmd.Parameters.AddWithValue("$channel", channel);
-                    insertCmd.ExecuteNonQuery();
-
-                    var cleanupCmd = connection.CreateCommand();
-                    cleanupCmd.CommandText = "DELETE FROM UnknownCommands WHERE Trigger = $trigger AND Channel = $channel";
-                    cleanupCmd.Parameters.AddWithValue("$trigger", trigger);
-                    cleanupCmd.Parameters.AddWithValue("$channel", channel);
-                    int removed = cleanupCmd.ExecuteNonQuery();
-
-                    if (removed > 0)
+                    if (lowerUser != "skunkelmusen")
                     {
-                        Console.ForegroundColor = ConsoleColor.Cyan;
-                        Console.WriteLine("[PROMOTED FROM UNKNOWN]");
-                        Console.ForegroundColor = ConsoleColor.Gray;
-                        Console.WriteLine("{0,-25}{1}", "command:", trigger);
-                        Console.WriteLine("{0,-25}{1}", "channel:", channel);
-                        Console.WriteLine("{0,-25}{1}", "status:", "Now registered as functional");
-                        Console.ResetColor();
+                        client.SendMessage(channel, "Only skunkelmusen can manage ops.");
+                        return;
                     }
-                }
 
-                client.SendMessage(channel, $"📌 Added command: {trigger}");
-
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine("[ADD SUCCEEDED]");
-                Console.ForegroundColor = ConsoleColor.Gray;
-                Console.WriteLine("{0,-25}{1}", "user:", user);
-                Console.WriteLine("{0,-25}{1}", "command:", trigger);
-                Console.WriteLine("{0,-25}{1}", "response:", response);
-                Console.WriteLine("{0,-25}{1}", "channel:", channel);
-                Console.ResetColor();
-                return;
-            }
-
-            if (message.StartsWith("$deletecommand "))
-            {
-                if (!IsAdmin(user))
-                {
-                    Console.ForegroundColor = ConsoleColor.Yellow;
-                    Console.WriteLine("[ACCESS DENIED]");
-                    Console.ForegroundColor = ConsoleColor.Gray;
-                    Console.WriteLine("{0,-25}{1}", "user:", user);
-                    Console.WriteLine("{0,-25}{1}", "command:", "$deletecommand");
-                    Console.WriteLine("{0,-25}{1}", "reason:", "not an admin");
-                    Console.ResetColor();
-                    client.SendMessage(channel, "Only admins can delete commands.");
-                    return;
-                }
-
-                var triggerToDelete = message.Substring(15).Trim();
-
-                using (var connection = new SqliteConnection("Data Source=commands.db"))
-                {
-                    connection.Open();
-
-                    var deleteCmd = connection.CreateCommand();
-                    deleteCmd.CommandText = "DELETE FROM Commands WHERE Trigger = $trigger AND Channel = $channel";
-                    deleteCmd.Parameters.AddWithValue("$trigger", triggerToDelete);
-                    deleteCmd.Parameters.AddWithValue("$channel", channel);
-
-                    int rowsAffected = deleteCmd.ExecuteNonQuery();
-
-                    if (rowsAffected > 0)
+                    var parts = message.Split(' ', 2);
+                    if (parts.Length < 2 || !parts[1].StartsWith("@"))
                     {
-                        client.SendMessage(channel, $"🗑️ Deleted command: {triggerToDelete}");
+                        client.SendMessage(channel, "Usage: $op @username or $deop @username");
+                        return;
+                    }
 
-                        Console.ForegroundColor = ConsoleColor.Green;
-                        Console.WriteLine("[DELETE SUCCEEDED]");
-                        Console.ForegroundColor = ConsoleColor.Gray;
-                        Console.WriteLine("{0,-25}{1}", "user:", user);
-                        Console.WriteLine("{0,-25}{1}", "command:", triggerToDelete);
-                        Console.WriteLine("{0,-25}{1}", "channel:", channel);
-                        Console.ResetColor();
+                    var target = parts[1].TrimStart('@').ToLower();
+                    var cmd = db.CreateCommand();
+                    if (message.StartsWith("$op "))
+                    {
+                        cmd.CommandText = "INSERT OR IGNORE INTO Admins (Username) VALUES ($user)";
+                        client.SendMessage(channel, $"🔐 @{target} is now an admin.");
                     }
                     else
                     {
-                        client.SendMessage(channel, $"⚠️ Command {triggerToDelete} not found.");
-
-                        Console.ForegroundColor = ConsoleColor.Yellow;
-                        Console.WriteLine("[DELETE FAILED]");
-                        Console.ForegroundColor = ConsoleColor.Gray;
-                        Console.WriteLine("{0,-25}{1}", "user:", user);
-                        Console.WriteLine("{0,-25}{1}", "attempted:", triggerToDelete);
-                        Console.WriteLine("{0,-25}{1}", "channel:", channel);
-                        Console.WriteLine("{0,-25}{1}", "reason:", "not found");
-                        Console.ResetColor();
+                        cmd.CommandText = "DELETE FROM Admins WHERE Username = $user";
+                        client.SendMessage(channel, $"❌ @{target} is no longer an admin.");
                     }
+                    cmd.Parameters.AddWithValue("$user", target);
+                    cmd.ExecuteNonQuery();
+                    return;
                 }
 
-                return;
-            }
+                if (message.StartsWith("$addcommand "))
+                {
+                    if (!IsAdmin())
+                    {
+                        client.SendMessage(channel, "Only admins can add commands.");
+                        return;
+                    }
 
-            using (var connection = new SqliteConnection("Data Source=commands.db"))
-            {
-                connection.Open();
-                var lookupCmd = connection.CreateCommand();
-                lookupCmd.CommandText = "SELECT Response FROM Commands WHERE Trigger = $trigger AND Channel = $channel";
-                lookupCmd.Parameters.AddWithValue("$trigger", message);
-                lookupCmd.Parameters.AddWithValue("$channel", channel);
+                    var split = message.Substring(12).Trim().Split(' ', 2);
+                    if (split.Length < 2)
+                    {
+                        client.SendMessage(channel, "Usage: $addcommand $<trigger> <response>");
+                        return;
+                    }
 
-                using (var reader = lookupCmd.ExecuteReader())
+                    var trigger = split[0];
+                    var response = split[1];
+
+                    // ➤ Trigger validation
+                    if (!trigger.StartsWith("$") || trigger.Length < 2 || trigger.Contains(" "))
+                    {
+                        client.SendMessage(channel, $"❌ Invalid trigger: {trigger}. Must start with '$' and contain no spaces.");
+
+                        Console.ForegroundColor = ConsoleColor.Red;
+                        Console.WriteLine("[ADD FAILED]");
+                        Console.ForegroundColor = ConsoleColor.Gray;
+                        Console.WriteLine("{0,-25}{1}", "user:", user);
+                        Console.WriteLine("{0,-25}{1}", "invalid trigger:", trigger);
+                        Console.WriteLine("{0,-25}{1}", "channel:", channel);
+                        Console.WriteLine("{0,-25}{1}", "reason:", "Trigger must start with '$' and contain no spaces.");
+                        Console.ResetColor();
+
+                        return;
+                    }
+
+                    var checkUnknown = db.CreateCommand();
+                    checkUnknown.CommandText = "SELECT COUNT(*) FROM UnknownCommands WHERE Trigger = $trigger AND Channel = $channel";
+                    checkUnknown.Parameters.AddWithValue("$trigger", trigger);
+                    checkUnknown.Parameters.AddWithValue("$channel", channel);
+                    bool wasUnknown = Convert.ToInt64(checkUnknown.ExecuteScalar()) > 0;
+
+                    var insert = db.CreateCommand();
+                    insert.CommandText = "INSERT OR REPLACE INTO Commands (Trigger, Response, Channel) VALUES ($trigger, $response, $channel)";
+                    insert.Parameters.AddWithValue("$trigger", trigger);
+                    insert.Parameters.AddWithValue("$response", response);
+                    insert.Parameters.AddWithValue("$channel", channel);
+                    insert.ExecuteNonQuery();
+
+                    var cleanup = db.CreateCommand();
+                    cleanup.CommandText = "DELETE FROM UnknownCommands WHERE Trigger = $trigger AND Channel = $channel";
+                    cleanup.Parameters.AddWithValue("$trigger", trigger);
+                    cleanup.Parameters.AddWithValue("$channel", channel);
+                    cleanup.ExecuteNonQuery();
+
+                    client.SendMessage(channel, $"📌 Added command: {trigger}");
+
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine("[ADD SUCCEEDED]");
+                    Console.ForegroundColor = ConsoleColor.Gray;
+                    Console.WriteLine("{0,-25}{1}", "user:", user);
+                    Console.WriteLine("{0,-25}{1}", "command:", trigger);
+                    Console.WriteLine("{0,-25}{1}", "response:", response);
+                    Console.WriteLine("{0,-25}{1}", "channel:", channel);
+                    Console.ResetColor();
+
+                    if (wasUnknown)
+                    {
+                        Console.ForegroundColor = ConsoleColor.DarkCyan;
+                        Console.WriteLine("[PROMOTED FROM UNKNOWN]");
+                        Console.ForegroundColor = ConsoleColor.Gray;
+                        Console.WriteLine("{0,-25}{1}", "trigger:", trigger);
+                        Console.WriteLine("{0,-25}{1}", "channel:", channel);
+                        Console.ResetColor();
+                    }
+
+                    return;
+                }
+
+
+                if (message.StartsWith("$deletecommand "))
+                {
+                    if (!IsAdmin())
+                    {
+                        client.SendMessage(channel, "Only admins can delete commands.");
+                        return;
+                    }
+
+                    var trigger = message.Substring(15).Trim();
+                    var cmd = db.CreateCommand();
+                    cmd.CommandText = "DELETE FROM Commands WHERE Trigger = $trigger AND Channel = $channel";
+                    cmd.Parameters.AddWithValue("$trigger", trigger);
+                    cmd.Parameters.AddWithValue("$channel", channel);
+                    int deleted = cmd.ExecuteNonQuery();
+
+                    client.SendMessage(channel, deleted > 0 ? $"🗑️ Deleted command: {trigger}" : $"⚠️ Command {trigger} not found.");
+                    return;
+                }
+
+                var parts2 = message.Split(' ', 2);
+                var triggerOnly = parts2[0];
+
+                var lookup = db.CreateCommand();
+                lookup.CommandText = "SELECT Response FROM Commands WHERE Trigger = $trigger AND Channel = $channel";
+                lookup.Parameters.AddWithValue("$trigger", triggerOnly);
+                lookup.Parameters.AddWithValue("$channel", channel);
+
+                using (var reader = lookup.ExecuteReader())
                 {
                     if (reader.Read())
                     {
-                        var response = reader.GetString(0);
+                        var responseTemplate = reader.GetString(0);
+
+                        if (responseTemplate.Contains("$target") && (parts2.Length < 2 || !parts2[1].StartsWith("@")))
+                        {
+                            client.SendMessage(channel, "⚠️ This command requires a target (e.g. $wave @someone)");
+                            return;
+                        }
+
+                        var target = parts2.Length > 1 && parts2[1].StartsWith("@") ? parts2[1] : "";
+
+                        var countCmd = db.CreateCommand();
+                        countCmd.CommandText = @"
+                            INSERT INTO CommandUsage (Trigger, Channel, Count)
+                            VALUES ($trigger, $channel, 1)
+                            ON CONFLICT(Trigger, Channel)
+                            DO UPDATE SET Count = Count + 1;
+                            SELECT Count FROM CommandUsage WHERE Trigger = $trigger AND Channel = $channel;";
+                        countCmd.Parameters.AddWithValue("$trigger", triggerOnly);
+                        countCmd.Parameters.AddWithValue("$channel", channel);
+                        var count = Convert.ToInt64(countCmd.ExecuteScalar());
+
+                        var response = responseTemplate
+                            .Replace("$user", $"@{user}")
+                            .Replace("$target", target)
+                            .Replace("$count", count.ToString());
+
                         client.SendMessage(channel, response);
 
                         Console.ForegroundColor = ConsoleColor.Gray;
@@ -325,16 +303,14 @@ class Program
                     }
                 }
 
-                if (message.StartsWith("$"))
+                if (message.StartsWith("$") || message.StartsWith("!"))
                 {
-                    var logCmd = connection.CreateCommand();
-                    logCmd.CommandText = @"
-                        INSERT INTO UnknownCommands (Trigger, User, Channel)
-                        VALUES ($trigger, $user, $channel)";
-                    logCmd.Parameters.AddWithValue("$trigger", message);
-                    logCmd.Parameters.AddWithValue("$user", user);
-                    logCmd.Parameters.AddWithValue("$channel", channel);
-                    logCmd.ExecuteNonQuery();
+                    var insert = db.CreateCommand();
+                    insert.CommandText = "INSERT INTO UnknownCommands (Trigger, User, Channel) VALUES ($trigger, $user, $channel)";
+                    insert.Parameters.AddWithValue("$trigger", message);
+                    insert.Parameters.AddWithValue("$user", user);
+                    insert.Parameters.AddWithValue("$channel", channel);
+                    insert.ExecuteNonQuery();
 
                     Console.ForegroundColor = ConsoleColor.Yellow;
                     Console.WriteLine("[UNKNOWN COMMAND]");
@@ -343,11 +319,26 @@ class Program
                     Console.WriteLine("{0,-25}{1}", "input:", message);
                     Console.WriteLine("{0,-25}{1}", "channel:", channel);
                     Console.ResetColor();
+                    return;
                 }
-            }
-        };
 
-        client.Connect();
-        Console.ReadLine();
+                var logCheck = db.CreateCommand();
+                logCheck.CommandText = "SELECT COUNT(*) FROM AiOptedIn WHERE Username = $user";
+                logCheck.Parameters.AddWithValue("$user", lowerUser);
+                if (Convert.ToInt64(logCheck.ExecuteScalar()) > 0)
+                {
+                    Console.ForegroundColor = ConsoleColor.White;
+                    Console.WriteLine("[CHAT LOG]");
+                    Console.ForegroundColor = ConsoleColor.Gray;
+                    Console.WriteLine("{0,-25}{1}", "user:", user);
+                    Console.WriteLine("{0,-25}{1}", "message:", message);
+                    Console.WriteLine("{0,-25}{1}", "channel:", channel);
+                    Console.ResetColor();
+                }
+            };
+
+            client.Connect();
+            Console.ReadLine();
+        }
     }
 }
