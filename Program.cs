@@ -1,5 +1,4 @@
-﻿
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using Microsoft.Data.Sqlite;
@@ -9,6 +8,17 @@ using TwitchLib.Client.Models;
 
 class Program
 {
+    static bool IsAdmin(SqliteConnection db, string username, string channel)
+    {
+        var lowerUser = username.ToLower();
+        if (lowerUser == "skunkelmusen") return true;
+
+        var cmd = db.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM Admins WHERE LOWER(Username) = LOWER($user)";
+        cmd.Parameters.AddWithValue("$user", lowerUser);
+        return Convert.ToInt64(cmd.ExecuteScalar()) > 0;
+    }
+
     static void Main(string[] args)
     {
         var username = "skunkllm";
@@ -30,6 +40,13 @@ class Program
                     Response TEXT NOT NULL,
                     Channel TEXT NOT NULL,
                     PRIMARY KEY (Trigger, Channel)
+                );
+                CREATE TABLE IF NOT EXISTS CommandCooldowns (
+                    Trigger TEXT NOT NULL,
+                    Channel TEXT NOT NULL,
+                    Username TEXT NOT NULL,
+                    LastUsed DATETIME NOT NULL,
+                    PRIMARY KEY (Trigger, Channel, Username)
                 );
                 CREATE TABLE IF NOT EXISTS UnknownCommands (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -85,25 +102,32 @@ class Program
                 var channel = e.ChatMessage.Channel;
                 var lowerUser = user.ToLower();
 
+                // Log AI opted-in messages first to avoid database lock issues
+                var logCheck = db.CreateCommand();
+                logCheck.CommandText = "SELECT COUNT(*) FROM AiOptedIn WHERE Username = $user";
+                logCheck.Parameters.AddWithValue("$user", lowerUser);
+                if (Convert.ToInt64(logCheck.ExecuteScalar()) > 0)
+                {
+                    Console.ForegroundColor = ConsoleColor.White;
+                    Console.WriteLine("[CHAT LOG]");
+                    Console.ForegroundColor = ConsoleColor.Gray;
+                    Console.WriteLine("{0,-25}{1}", "user:", user);
+                    Console.WriteLine("{0,-25}{1}", "message:", message);
+                    Console.WriteLine("{0,-25}{1}", "channel:", channel);
+                    Console.ResetColor();
+                }
+
                 string[] parts = message.Split(' ', 2);
                 string trigger = parts[0];
                 string arg = parts.Length > 1 ? parts[1] : "";
-
-                bool IsAdmin()
-                {
-                    var cmd = db.CreateCommand();
-                    cmd.CommandText = "SELECT COUNT(*) FROM Admins WHERE LOWER(Username) = LOWER($user)";
-                    cmd.Parameters.AddWithValue("$user", lowerUser);
-                    return Convert.ToInt64(cmd.ExecuteScalar()) > 0 || lowerUser == "skunkelmusen";
-                }
 
                 // ==== HARDCODED COMMANDS WITH VALIDATION ====
 
                 if (trigger.Equals("$stop", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (!IsAdmin())
+                    if (!IsAdmin(db, user, channel))
                     {
-                        client.SendMessage(channel, "Only skunkelmusen can stop me.");
+                        client.SendMessage(channel, "Only admins can stop me.");
                         return;
                     }
 
@@ -188,7 +212,7 @@ class Program
                     var target = arg.TrimStart('@').ToLower();
                     var cmd = db.CreateCommand();
 
-                    if (trigger == "$op")
+                    if (trigger.Equals("$op", StringComparison.OrdinalIgnoreCase))
                     {
                         cmd.CommandText = "INSERT OR IGNORE INTO Admins (Username) VALUES ($user)";
                         client.SendMessage(channel, $"🔐 @{target} is now an admin.");
@@ -206,7 +230,7 @@ class Program
 
                 if (trigger.Equals("$addcommand", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (!IsAdmin())
+                    if (!IsAdmin(db, user, channel))
                     {
                         client.SendMessage(channel, "Only admins can add commands.");
                         return;
@@ -252,7 +276,7 @@ class Program
 
                 if (trigger.Equals("$deletecommand", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (!IsAdmin())
+                    if (!IsAdmin(db, user, channel))
                     {
                         client.SendMessage(channel, "Only admins can delete commands.");
                         return;
@@ -286,6 +310,55 @@ class Program
                 {
                     if (reader.Read())
                     {
+                        // FIXED COOLDOWN IMPLEMENTATION START
+                        var cooldownCmd = db.CreateCommand();
+                        cooldownCmd.CommandText = @"
+                            SELECT LastUsed FROM CommandCooldowns 
+                            WHERE Trigger = $trigger AND Channel = $channel AND Username = $user";
+                        cooldownCmd.Parameters.AddWithValue("$trigger", trigger);
+                        cooldownCmd.Parameters.AddWithValue("$channel", channel);
+                        cooldownCmd.Parameters.AddWithValue("$user", lowerUser);
+
+                        var lastUsedObj = cooldownCmd.ExecuteScalar();
+                        bool canExecute = true;
+
+                        if (lastUsedObj != null)
+                        {
+                            var lastUsed = DateTime.Parse(lastUsedObj.ToString());
+                            var secondsSince = (DateTime.UtcNow - lastUsed).TotalSeconds;
+                            if (secondsSince < 10)
+                            {
+                                Console.ForegroundColor = ConsoleColor.Yellow;
+                                Console.WriteLine("[COMMAND RATE-LIMIT]");
+                                Console.ForegroundColor = ConsoleColor.Gray;
+                                Console.WriteLine("{0,-25}{1}", "user:", user);
+                                Console.WriteLine("{0,-25}{1}", "command:", trigger);
+                                Console.WriteLine("{0,-25}{1}", "seconds remaining:", (10 - secondsSince).ToString("F2"));
+                                Console.WriteLine("{0,-25}{1}", "channel:", channel);
+                                Console.ResetColor();
+                                canExecute = false;
+                            }
+                        }
+
+                        if (!canExecute)
+                        {
+                            return;
+                        }
+
+                        // Update cooldown BEFORE executing command
+                        var updateCooldown = db.CreateCommand();
+                        updateCooldown.CommandText = @"
+                            INSERT INTO CommandCooldowns (Trigger, Channel, Username, LastUsed)
+                            VALUES ($trigger, $channel, $user, $now)
+                            ON CONFLICT(Trigger, Channel, Username)
+                            DO UPDATE SET LastUsed = $now";
+                        updateCooldown.Parameters.AddWithValue("$trigger", trigger);
+                        updateCooldown.Parameters.AddWithValue("$channel", channel);
+                        updateCooldown.Parameters.AddWithValue("$user", lowerUser);
+                        updateCooldown.Parameters.AddWithValue("$now", DateTime.UtcNow);
+                        updateCooldown.ExecuteNonQuery();
+                        // FIXED COOLDOWN IMPLEMENTATION END
+
                         var responseTemplate = reader.GetString(0);
                         var args = arg;
 
@@ -312,6 +385,8 @@ class Program
                             .Replace("$target", args)
                             .Replace("$count", count.ToString());
 
+                        response = ProcessTokens(response);
+
                         client.SendMessage(channel, response);
 
                         Console.ForegroundColor = ConsoleColor.Green;
@@ -327,7 +402,6 @@ class Program
                 }
 
                 // === UNKNOWN COMMAND LOGGING ===
-
                 if (trigger.StartsWith("$") || trigger.StartsWith("!"))
                 {
                     var insert = db.CreateCommand();
@@ -345,20 +419,6 @@ class Program
                     Console.WriteLine("{0,-25}{1}", "channel:", channel);
                     Console.ResetColor();
                 }
-                var logCheck = db.CreateCommand();
-                logCheck.CommandText = "SELECT COUNT(*) FROM AiOptedIn WHERE Username = $user";
-                logCheck.Parameters.AddWithValue("$user", lowerUser);
-                if (Convert.ToInt64(logCheck.ExecuteScalar()) > 0)
-                {
-                    Console.ForegroundColor = ConsoleColor.White;
-                    Console.WriteLine("[CHAT LOG]");
-                    Console.ForegroundColor = ConsoleColor.Gray;
-                    Console.WriteLine("{0,-25}{1}", "user:", user);
-                    Console.WriteLine("{0,-25}{1}", "message:", message);
-                    Console.WriteLine("{0,-25}{1}", "channel:", channel);
-                    Console.ResetColor();
-                }
-
             };
 
             client.Connect();
@@ -376,5 +436,31 @@ class Program
         Console.WriteLine("{0,-25}{1}", "command:", command);
         Console.WriteLine("{0,-25}{1}", "reason:", reason);
         Console.ResetColor();
+    }
+
+    static string ProcessTokens(string input)
+    {
+        var random = new Random();
+
+        // Process $random[min-max]
+        var randomMatches = System.Text.RegularExpressions.Regex.Matches(input, @"\$random\[(\d+)-(\d+)\]");
+        foreach (System.Text.RegularExpressions.Match match in randomMatches)
+        {
+            int min = int.Parse(match.Groups[1].Value);
+            int max = int.Parse(match.Groups[2].Value);
+            int value = random.Next(min, max + 1); // Inclusive of max
+            input = input.Replace(match.Value, value.ToString());
+        }
+
+        // Process $selection[word1,word2,...]
+        var selectionMatches = System.Text.RegularExpressions.Regex.Matches(input, @"\$selection\[([^\]]+)\]");
+        foreach (System.Text.RegularExpressions.Match match in selectionMatches)
+        {
+            var options = match.Groups[1].Value.Split(',').Select(s => s.Trim()).ToArray();
+            var choice = options[random.Next(options.Length)];
+            input = input.Replace(match.Value, choice);
+        }
+
+        return input;
     }
 }
