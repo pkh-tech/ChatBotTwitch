@@ -424,7 +424,7 @@ namespace Bot.Events
                 model = "nousresearch/nous-hermes-2-mistral-7b-dpo",
                 messages = new[]
                 {
-            new { role = "system", content = "You are a helpful assistant responding in Twitch chat. Keep your answers concise and always under 450 characters." },
+            new { role = "system", content = "You are a relaxed Twitch helper bot. 'Sminks' means to smoke a joint. If a user asks you to tell someone something and includes a name with @ (e.g., @skunkelmusen), reply as if speaking directly to that name. Only use the name provided—never default to @skunkelmusen. If a user asks you to ask bby something, start your message with '!bby <question>'. Keep replies concise, casual, and always under 450 characters." },
             new { role = "user", content = input }
         },
                 temperature = 0.7

@@ -14,7 +14,7 @@ class Program
     {
         var username = "skunkllm";
         var accessToken = "oauth:ufv99wh0tt0a2pkaxgdtvz6bq05kl8";
-        var channelName = "skunkelmusen";
+        var channelName = "ChildOfAnAndroid";
 
         var credentials = new ConnectionCredentials(username, accessToken);
         var client = new TwitchClient();
@@ -103,15 +103,25 @@ class Program
                 builder.Append("<html><head><title>SkunkLLM Commands</title><style>");
                 builder.Append("body { font-family: sans-serif; padding: 20px; }");
                 builder.Append("code { background: #eee; padding: 2px 4px; }");
+                builder.Append("pre { background: #f4f4f4; padding: 10px; border-left: 4px solid #ccc; }");
                 builder.Append("</style></head><body>");
                 builder.Append("<h1>Available Commands</h1>");
 
                 builder.Append("<p>You can use the following tokens inside commands:</p><ul>");
                 builder.Append("<li><code>$user</code> the sender's username</li>");
                 builder.Append("<li><code>$target</code> the first argument after the command</li>");
+                builder.Append("<li><code>$count</code> how many times the command has been used</li>");
                 builder.Append("<li><code>$random[min-max]</code> generates a random number in the given range</li>");
                 builder.Append("<li><code>$selection[item1,item2,...]</code> picks a random item from the list</li>");
                 builder.Append("</ul>");
+
+                builder.Append("<h2>Example Commands</h2><pre>");
+                builder.Append("$addcommand $greet Hello $user, welcome to the stream!\n\n");
+                builder.Append("$addcommand $hug $user gives a warm hug to $target (hugged $count times so far)\n\n");
+                builder.Append("$addcommand $slap $user slaps $target around with a large trout\n\n");
+                builder.Append("$addcommand $roll $user just smoked $random[1-666] joints\n\n");
+                builder.Append("$addcommand $snack $user is craving $selection[pizza, sushi, burger, salad, donuts, ramen, chocolate, tacos, ice cream]");
+                builder.Append("</pre>");
 
                 builder.Append("<h2>Command List</h2><ul>");
 
@@ -141,4 +151,5 @@ class Program
             }
         });
     }
+
 }
